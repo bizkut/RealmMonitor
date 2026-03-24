@@ -1,0 +1,7 @@
+services:
+  realm-monitor:
+    build: .
+    container_name: wow-realm-monitor
+    env_file:
+      - .env
+    restart: unless-stopped
