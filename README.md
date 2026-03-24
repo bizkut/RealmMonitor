@@ -32,8 +32,7 @@ Edit `.env` with your credentials:
 | `BLIZZARD_CLIENT_SECRET` | From Blizzard Developer Portal |
 | `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | Your Telegram chat/group ID |
-| `REGION` | `us`, `eu`, `kr`, or `tw` |
-| `REALMS` | Comma-separated realm names (e.g. `Frostmourne,Gundrak`) |
+| `REALMS` | Comma-separated realms in `REGION-RealmName` format.<br>Regions: `us`, `eu`, `kr`, `tw`<br>Example: `US-Frostmourne,EU-Tarren Mill` |
 
 ### 2a. Run with Docker (recommended)
 

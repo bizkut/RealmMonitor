@@ -28,7 +28,6 @@ def load_config() -> dict:
         "BLIZZARD_CLIENT_SECRET",
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHAT_ID",
-        "REGION",
         "REALMS",
     ]
 
@@ -46,15 +45,28 @@ def load_config() -> dict:
         logger.error("Please fill in your .env file. See .env.example for reference.")
         sys.exit(1)
 
-    # Parse realms into slugs
-    realm_names = [r.strip() for r in config["REALMS"].split(",") if r.strip()]
-    if not realm_names:
-        logger.error("REALMS must contain at least one realm name.")
+    # Parse realms into (region, slug, name)
+    raw_realms = [r.strip() for r in config["REALMS"].split(",") if r.strip()]
+    if not raw_realms:
+        logger.error("REALMS must contain at least one realm in REGION-RealmName format.")
         sys.exit(1)
 
-    config["REALM_SLUGS"] = [BlizzardAPI.to_slug(name) for name in realm_names]
-    config["REALM_NAMES"] = realm_names
+    parsed_realms = []
+    for raw in raw_realms:
+        if "-" not in raw:
+            logger.error("Invalid format for realm '%s'. Must be REGION-RealmName (e.g. US-Frostmourne)", raw)
+            sys.exit(1)
+        
+        region, name = raw.split("-", 1)
+        region = region.strip().lower()
+        if region not in ["us", "eu", "kr", "tw"]:
+            logger.error("Invalid region '%s' for realm '%s'. Valid regions: us, eu, kr, tw", region, raw)
+            sys.exit(1)
+            
+        slug = BlizzardAPI.to_slug(name)
+        parsed_realms.append((region, slug, name.strip()))
 
+    config["PARSED_REALMS"] = parsed_realms
     return config
 
 
@@ -63,8 +75,9 @@ async def main():
     config = load_config()
 
     logger.info("=== WoW Realm Monitor ===")
-    logger.info("Region: %s", config["REGION"].upper())
-    logger.info("Realms: %s", ", ".join(config["REALM_NAMES"]))
+    
+    realm_display = [f"{r[0].upper()}-{r[2]}" for r in config["PARSED_REALMS"]]
+    logger.info("Monitoring Realms: %s", ", ".join(realm_display))
 
     api = BlizzardAPI(
         client_id=config["BLIZZARD_CLIENT_ID"],
@@ -75,8 +88,7 @@ async def main():
         blizzard_api=api,
         telegram_token=config["TELEGRAM_BOT_TOKEN"],
         chat_id=config["TELEGRAM_CHAT_ID"],
-        region=config["REGION"],
-        realm_slugs=config["REALM_SLUGS"],
+        realms=config["PARSED_REALMS"],
     )
 
     try:

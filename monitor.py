@@ -24,16 +24,15 @@ class RealmMonitor:
         blizzard_api: BlizzardAPI,
         telegram_token: str,
         chat_id: str,
-        region: str,
-        realm_slugs: list[str],
+        realms: list[tuple[str, str, str]], # (region, slug, name)
     ):
         self.api = blizzard_api
         self.telegram_token = telegram_token
         self.chat_id = chat_id
-        self.region = region.lower()
-        self.realm_slugs = realm_slugs
-        # Track last known status per realm: {slug: "UP" | "DOWN" | None}
-        self._last_status: dict[str, str | None] = {s: None for s in realm_slugs}
+        self.realms = realms
+        
+        # Track last known status per realm: {(region, slug): "UP" | "DOWN" | None}
+        self._last_status: dict[tuple[str, str], str | None] = {(r[0], r[1]): None for r in realms}
         self._running = False
 
     async def send_telegram(self, session: aiohttp.ClientSession, message: str):
@@ -61,10 +60,11 @@ class RealmMonitor:
         """
         min_cache_age = FALLBACK_POLL_INTERVAL
 
-        for slug in self.realm_slugs:
+        for region, slug, original_name in self.realms:
+            realm_key = (region, slug)
             try:
                 realm_data, cache_max_age = await self.api.get_realm_status(
-                    session, self.region, slug
+                    session, region, slug
                 )
 
                 if cache_max_age > 0:
@@ -75,9 +75,11 @@ class RealmMonitor:
                     continue
 
                 current_status = realm_data["status"]
-                previous_status = self._last_status.get(slug)
-                realm_name = realm_data.get("name", slug)
-                region_upper = self.region.upper()
+                previous_status = self._last_status.get(realm_key)
+                
+                # Use name from API if available, else fallback to configured name
+                realm_name = realm_data.get("name", original_name)
+                region_upper = region.upper()
 
                 # Only notify on status CHANGE (skip first check to establish baseline)
                 if previous_status is not None and current_status != previous_status:
@@ -92,32 +94,26 @@ class RealmMonitor:
                             f"🔴 <b>Realm \"{realm_name}\" ({region_upper}) "
                             f"went OFFLINE</b>\n🕐 {now}"
                         )
-                    logger.info("Status change: %s -> %s for %s", previous_status, current_status, slug)
+                    logger.info("Status change: %s -> %s for %s-%s", previous_status, current_status, region_upper, slug)
                     await self.send_telegram(session, msg)
 
-                self._last_status[slug] = current_status
+                self._last_status[realm_key] = current_status
 
             except Exception as e:
-                logger.error("Error checking realm %s: %s", slug, e)
+                logger.error("Error checking realm %s-%s: %s", region.upper(), slug, e)
 
         return max(min_cache_age, MIN_POLL_INTERVAL)
 
     async def run(self):
         """Main monitoring loop. Runs until stopped."""
         self._running = True
-        logger.info(
-            "Starting realm monitor for %s realm(s) in %s: %s",
-            len(self.realm_slugs),
-            self.region.upper(),
-            ", ".join(self.realm_slugs),
-        )
+        logger.info("Starting realm monitor for %d realm(s)", len(self.realms))
 
         async with aiohttp.ClientSession() as session:
             # Send startup message
-            realm_list = ", ".join(s.title() for s in self.realm_slugs)
+            realm_list = ", ".join(f"{r[0].upper()}-{r[2].title()}" for r in self.realms)
             startup_msg = (
                 f"🔔 <b>WoW Realm Monitor Started</b>\n"
-                f"📍 Region: <b>{self.region.upper()}</b>\n"
                 f"🎮 Realms: <b>{realm_list}</b>\n"
                 f"⏱ Polling: cache-based (min {MIN_POLL_INTERVAL}s, "
                 f"fallback {FALLBACK_POLL_INTERVAL}s)"
@@ -130,10 +126,10 @@ class RealmMonitor:
 
             # Build initial status message
             status_lines = []
-            for slug in self.realm_slugs:
-                status = self._last_status.get(slug, "UNKNOWN")
+            for region, slug, name in self.realms:
+                status = self._last_status.get((region, slug), "UNKNOWN")
                 icon = "🟢" if status == "UP" else "🔴" if status == "DOWN" else "❓"
-                status_lines.append(f"  {icon} {slug.title()}: {status}")
+                status_lines.append(f"  {icon} {region.upper()}-{name.title()}: {status}")
 
             initial_msg = (
                 f"📊 <b>Initial Realm Status</b>\n"
