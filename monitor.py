@@ -1,9 +1,8 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
-from datetime import timedelta
-
+from datetime import datetime, timezone, timedelta
+import zoneinfo
 import aiohttp
 from telegram import Bot
 
@@ -69,17 +68,24 @@ class MonitorService:
                 region_upper = region.upper()
 
                 if previous_status is not None and current_status != previous_status:
-                    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-                    v_tag = f"[{game_version.title()}] " if game_version != "retail" else ""
-                    if current_status == "UP":
-                        msg = f"🟢 <b>Realm {v_tag}\"{realm_name}\" ({region_upper}) is back ONLINE</b>\n🕐 {now}"
-                    else:
-                        msg = f"🔴 <b>Realm {v_tag}\"{realm_name}\" ({region_upper}) went OFFLINE</b>\n🕐 {now}"
-                    
                     logger.info("Status change: %s -> %s for %s-%s (%s)", previous_status, current_status, region_upper, slug, game_version)
                     users = await database.get_users_for_realm(region, slug, game_version)
                     if users:
-                        await self.broadcast_telegram(users, msg)
+                        v_tag = f"[{game_version.title()}] " if game_version != "retail" else ""
+                        tz_groups = await database.get_users_by_timezone(users)
+                        for tz_name, user_group in tz_groups.items():
+                            try:
+                                tz = zoneinfo.ZoneInfo(tz_name)
+                            except Exception:
+                                tz = zoneinfo.ZoneInfo("UTC")
+                            
+                            now_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+                            if current_status == "UP":
+                                local_msg = f"🟢 <b>Realm {v_tag}\"{realm_name}\" ({region_upper}) is back ONLINE</b>\n🕐 {now_local}"
+                            else:
+                                local_msg = f"🔴 <b>Realm {v_tag}\"{realm_name}\" ({region_upper}) went OFFLINE</b>\n🕐 {now_local}"
+                                
+                            await self.broadcast_telegram(user_group, local_msg)
 
                 self._last_status[realm_key] = current_status
 
@@ -99,14 +105,20 @@ class MonitorService:
                     targets = await database.get_bluesky_subscribers(['all'])
                 
                 if targets:
-                    msg = (
-                        f"🐦 <b>Blizzard Support Update</b>\n\n"
-                        f"{post['text']}\n\n"
-                        # Bluesky post URIs are 'at://...', we can't easily deep link the exact post without parsing
-                        # But we can at least drop a general link. Usually AT URIs look like: at://did:plc:x/app.bsky.feed.post/y
-                        f"👉 <a href='https://bsky.app/profile/support.blizzard.com'>View on Bluesky</a>"
-                    )
-                    await self.broadcast_telegram(targets, msg)
+                    tz_groups = await database.get_users_by_timezone(targets)
+                    for tz_name, user_group in tz_groups.items():
+                        try:
+                            tz = zoneinfo.ZoneInfo(tz_name)
+                        except Exception:
+                            tz = zoneinfo.ZoneInfo("UTC")
+                        now_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+                        msg = (
+                            f"🐦 <b>Blizzard Support Update</b>\n\n"
+                            f"{post['text']}\n\n"
+                            f"🕐 {now_local}\n"
+                            f"👉 <a href='https://bsky.app/profile/support.blizzard.com'>View on Bluesky</a>"
+                        )
+                        await self.broadcast_telegram(user_group, msg)
         except Exception as e:
             logger.error("Error checking Bluesky: %s", e)
     async def check_wow_bluesky(self):
@@ -119,12 +131,20 @@ class MonitorService:
                 targets = await database.get_wow_bluesky_subscribers(['all'])
                 
                 if targets:
-                    msg = (
-                        f"🗡 <b>Official WoW Update</b>\n\n"
-                        f"{post['text']}\n\n"
-                        f"👉 <a href='https://bsky.app/profile/worldofwarcraft.blizzard.com'>View on Bluesky</a>"
-                    )
-                    await self.broadcast_telegram(targets, msg)
+                    tz_groups = await database.get_users_by_timezone(targets)
+                    for tz_name, user_group in tz_groups.items():
+                        try:
+                            tz = zoneinfo.ZoneInfo(tz_name)
+                        except Exception:
+                            tz = zoneinfo.ZoneInfo("UTC")
+                        now_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+                        msg = (
+                            f"🗡 <b>Official WoW Update</b>\n\n"
+                            f"{post['text']}\n\n"
+                            f"🕐 {now_local}\n"
+                            f"👉 <a href='https://bsky.app/profile/worldofwarcraft.blizzard.com'>View on Bluesky</a>"
+                        )
+                        await self.broadcast_telegram(user_group, msg)
         except Exception as e:
             logger.error("Error checking WoW Bluesky: %s", e)
             
@@ -138,12 +158,20 @@ class MonitorService:
                 targets = await database.get_classic_bluesky_subscribers(['all'])
                 
                 if targets:
-                    msg = (
-                        f"🛡 <b>WoW Classic Devs Update</b>\n\n"
-                        f"{post['text']}\n\n"
-                        f"👉 <a href='https://bsky.app/profile/wowclassicdevs.blizzard.com'>View on Bluesky</a>"
-                    )
-                    await self.broadcast_telegram(targets, msg)
+                    tz_groups = await database.get_users_by_timezone(targets)
+                    for tz_name, user_group in tz_groups.items():
+                        try:
+                            tz = zoneinfo.ZoneInfo(tz_name)
+                        except Exception:
+                            tz = zoneinfo.ZoneInfo("UTC")
+                        now_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+                        msg = (
+                            f"🛡 <b>WoW Classic Devs Update</b>\n\n"
+                            f"{post['text']}\n\n"
+                            f"🕐 {now_local}\n"
+                            f"👉 <a href='https://bsky.app/profile/wowclassicdevs.blizzard.com'>View on Bluesky</a>"
+                        )
+                        await self.broadcast_telegram(user_group, msg)
         except Exception as e:
             logger.error("Error checking Classic Bluesky: %s", e)
     async def _realm_loop(self):

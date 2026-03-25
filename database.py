@@ -15,7 +15,8 @@ async def init_db():
                 chat_id INTEGER PRIMARY KEY,
                 bluesky_pref TEXT DEFAULT 'none', -- 'none', 'maintenance', 'all'
                 wow_bluesky_pref TEXT DEFAULT 'none', -- 'none', 'all'
-                classic_bluesky_pref TEXT DEFAULT 'none' -- 'none', 'all'
+                classic_bluesky_pref TEXT DEFAULT 'none', -- 'none', 'all'
+                timezone TEXT DEFAULT 'UTC'
             )
         ''')
         await db.execute('''
@@ -76,6 +77,12 @@ async def init_db():
         except aiosqlite.OperationalError:
             pass # Column already exists
             
+        # Migration: Add timezone to users if missing
+        try:
+            await db.execute('ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT "UTC"')
+        except aiosqlite.OperationalError:
+            pass # Column already exists
+            
         await db.commit()
     logger.info("Database initialized at %s", DB_PATH)
 
@@ -112,6 +119,15 @@ async def update_classic_bluesky_pref(chat_id: int, pref: str):
         await db.execute(
             'UPDATE users SET classic_bluesky_pref = ? WHERE chat_id = ?',
             (pref, chat_id)
+        )
+        await db.commit()
+
+async def update_user_timezone(chat_id: int, timezone: str):
+    """Update timezone preference for a user."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            'UPDATE users SET timezone = ? WHERE chat_id = ?',
+            (timezone, chat_id)
         )
         await db.commit()
 
@@ -168,6 +184,32 @@ async def get_classic_bluesky_subscribers(pref_match: list[str]) -> list[int]:
             rows = await cursor.fetchall()
             return [r[0] for r in rows]
     return []
+
+async def get_user_timezone(chat_id: int) -> str:
+    """Get timezone preference for a user."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute('SELECT timezone FROM users WHERE chat_id = ?', (chat_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 'UTC'
+    return 'UTC'
+
+async def get_users_by_timezone(chat_ids: list[int]) -> dict[str, list[int]]:
+    """Group a list of chat_ids by their timezone preference."""
+    if not chat_ids:
+        return {}
+        
+    async with aiosqlite.connect(DB_PATH) as db:
+        placeholders = ','.join(['?'] * len(chat_ids))
+        query = f'SELECT chat_id, timezone FROM users WHERE chat_id IN ({placeholders})'
+        async with db.execute(query, chat_ids) as cursor:
+            rows = await cursor.fetchall()
+            tz_map = {}
+            for cid, tz in rows:
+                if tz not in tz_map:
+                    tz_map[tz] = []
+                tz_map[tz].append(cid)
+            return tz_map
+    return {}
 
 async def add_realm(chat_id: int, region: str, slug: str, name: str, game_version: str = 'retail'):
     """Add a realm to the user's monitor list."""

@@ -1,6 +1,9 @@
 import asyncio
 import logging
 import warnings
+from datetime import datetime, timezone
+import zoneinfo
+import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
     ContextTypes, CommandHandler, CallbackQueryHandler, 
@@ -14,6 +17,7 @@ from database import (
     register_user, get_bluesky_pref, update_bluesky_pref,
     get_wow_bluesky_pref, update_wow_bluesky_pref,
     get_classic_bluesky_pref, update_classic_bluesky_pref,
+    get_user_timezone, update_user_timezone,
     get_user_realms, add_realm, remove_realm,
     get_admin, get_total_users, get_total_realms
 )
@@ -25,6 +29,7 @@ logger = logging.getLogger(__name__)
 AWAITING_VERSION = 1
 AWAITING_REGION = 2
 AWAITING_REALM_NAME = 3
+AWAITING_TIMEZONE = 4
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler. Registers user and shows welcome menu."""
@@ -36,13 +41,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I will send you alerts when your configured realms go offline or come back online.\n\n"
         "Use /menu to manage your realms and Bluesky feed preferences."
     )
-    await update.message.reply_text(welcome_text)
+    message = update.effective_message
+    if message:
+        await message.reply_text(welcome_text)
     await show_menu(update, context)
 
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display the main configuration menu."""
     chat_id = update.effective_chat.id
-    message = update.message if update.message else update.callback_query.message
+    message = update.effective_message if update.effective_message else update.callback_query.message
     
     # Ensure user exists before displaying/modifying preferences
     await register_user(chat_id)
@@ -51,6 +58,7 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bsky_pref = await get_bluesky_pref(chat_id)
     wow_bsky_pref = await get_wow_bluesky_pref(chat_id)
     classic_bsky_pref = await get_classic_bluesky_pref(chat_id)
+    user_tz = await get_user_timezone(chat_id)
     
     bsky_display = {
         'none': '🔕 Off',
@@ -70,6 +78,7 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [InlineKeyboardButton("➕ Add Realm", callback_data="add_realm")],
+        [InlineKeyboardButton(f"🌐 Timezone: {user_tz}", callback_data="start_set_timezone")],
         [InlineKeyboardButton(f"🐦 Support: {bsky_display}", callback_data="toggle_bsky")],
         [InlineKeyboardButton(f"🗡 WoW: {wow_bsky_display}", callback_data="toggle_wow_bsky")],
         [InlineKeyboardButton(f"🛡 Classic: {classic_bsky_display}", callback_data="toggle_classic_bsky")]
@@ -133,6 +142,61 @@ async def toggle_classic_bsky(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update_classic_bluesky_pref(chat_id, next_pref)
     await show_menu(update, context)
 
+async def start_set_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start the timezone setting flow."""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [
+        [InlineKeyboardButton("UTC", callback_data="set_tz_UTC"), InlineKeyboardButton("London", callback_data="set_tz_Europe/London")],
+        [InlineKeyboardButton("New York", callback_data="set_tz_America/New_York"), InlineKeyboardButton("Los Angeles", callback_data="set_tz_America/Los_Angeles")],
+        [InlineKeyboardButton("Seoul/Tokyo", callback_data="set_tz_Asia/Seoul"), InlineKeyboardButton("Sydney", callback_data="set_tz_Australia/Sydney")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_tz")]
+    ]
+    
+    await query.edit_message_text(
+        "🌐 **Set Timezone**\n\n"
+        "Select a common timezone below, or **type** an IANA timezone name (e.g., `Europe/Berlin`).",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+    return AWAITING_TIMEZONE
+
+async def handle_timezone_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle timezone selection from buttons or text."""
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    
+    if query:
+        await query.answer()
+        if query.data == "cancel_tz":
+            await show_menu(update, context)
+            return ConversationHandler.END
+        tz_name = query.data.replace("set_tz_", "")
+    else:
+        tz_name = update.effective_message.text.strip()
+        
+    try:
+        # Validate the timezone
+        zoneinfo.ZoneInfo(tz_name)
+        await update_user_timezone(chat_id, tz_name)
+        
+        msg = f"✅ Timezone updated to `{tz_name}`."
+        if query:
+            await query.edit_message_text(msg, parse_mode="Markdown")
+        else:
+            await update.effective_message.reply_text(msg, parse_mode="Markdown")
+            
+        await show_menu(update, context)
+        return ConversationHandler.END
+    except Exception:
+        error_msg = f"❌ `{tz_name}` is not a valid IANA timezone name. Please try again or use /cancel."
+        if query:
+            await query.edit_message_text(error_msg, parse_mode="Markdown")
+        else:
+            await update.effective_message.reply_text(error_msg, parse_mode="Markdown")
+        return AWAITING_TIMEZONE
+
 async def handle_remove_realm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove a realm from the user's list."""
     query = update.callback_query
@@ -154,7 +218,7 @@ async def start_add_realm(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.callback_query.answer()
         message = update.callback_query.message
     else:
-        message = update.message
+        message = update.effective_message
         
     version_keyboard = [
         [
@@ -219,7 +283,7 @@ async def select_region(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def handle_realm_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle text input for realm name, and add to database."""
-    search_term = update.message.text.strip().lower()
+    search_term = update.effective_message.text.strip().lower()
     
     if search_term == '/cancel':
         return await cancel_add(update, context)
@@ -234,7 +298,6 @@ async def handle_realm_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if expired:
         monitor = context.bot_data.get('monitor')
         if monitor and monitor.api:
-            import aiohttp
             async with aiohttp.ClientSession() as session:
                 realms = await monitor.api.fetch_realm_index(session, region, version)
                 if realms:
@@ -242,7 +305,7 @@ async def handle_realm_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     
     match = await find_known_realm(region, version, search_term)
     if not match:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"❌ Realm '{search_term.title()}' not found in {region.upper()} {version.title()}.\n"
             "Please check your spelling and try again. Use /cancel to abort."
         )
@@ -256,13 +319,13 @@ async def handle_realm_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await add_realm(chat_id, region, slug, official_name, version)
     
     v_tag = f"[{version.title()}] " if version != "retail" else ""
-    await update.message.reply_text(f"✅ Added {v_tag}{region.upper()}-{official_name} to your watchlist.")
+    await update.effective_message.reply_text(f"✅ Added {v_tag}{region.upper()}-{official_name} to your watchlist.")
     await show_menu(update, context)
     return ConversationHandler.END
 
 async def cancel_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the realm addition flow."""
-    await update.message.reply_text("Realm addition cancelled.")
+    await update.effective_message.reply_text("Realm addition cancelled.")
     await show_menu(update, context)
     return ConversationHandler.END
 
@@ -274,7 +337,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     monitor = context.bot_data.get('monitor')
     if not monitor:
-        await update.message.reply_text("Stats are currently unavailable.")
+        await update.effective_message.reply_text("Stats are currently unavailable.")
         return
         
     stats_data = monitor.get_stats()
@@ -290,91 +353,120 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🐦 **Bluesky RPM:** `{stats_data['bluesky_rpm']}` requests/min"
     )
     
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await update.effective_message.reply_text(msg, parse_mode="Markdown")
 
 
 async def check_realm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Check a specific realm's status inline."""
-    if not context.args:
-        await update.message.reply_text("Usage: /check <version>-<region>-<realmname>\nExample: /check retail-us-Frostmourne")
+    message = update.effective_message
+    if not message:
         return
         
-    query = " ".join(context.args).strip()
-    parts = query.split("-")
-    
-    valid_versions = ['retail', 'classic', 'classic-era', 'sod']
-    if parts[0].lower() in valid_versions:
-        version = parts.pop(0).lower()
-        if version == 'sod':
-            version = 'classic-era'
-    else:
-        version = 'retail'
+    try:
+        if not context.args:
+            await message.reply_text("Usage: /check <version>-<region>-<realmname>\nExample: /check retail-us-Frostmourne")
+            return
+            
+        query = " ".join(context.args).strip()
+        logger.info("Executing /check for query: '%s'", query)
+        parts = query.split("-")
         
-    if len(parts) < 2:
-        await update.message.reply_text("Invalid format. Use `[version]-<region>-<realmname>` (e.g. `us-Frostmourne` or `classic-eu-Firemaw`)", parse_mode="Markdown")
-        return
+        valid_versions = ['retail', 'classic', 'classic-era', 'sod']
+        if parts[0].lower() in valid_versions:
+            version = parts.pop(0).lower()
+            if version == 'sod':
+                version = 'classic-era'
+        else:
+            version = 'retail'
+            
+        if len(parts) < 2:
+            await message.reply_text("Invalid format. Use `[version]-<region>-<realmname>` (e.g. `us-Frostmourne` or `classic-eu-Firemaw`)", parse_mode="Markdown")
+            return
+            
+        region = parts.pop(0).lower()
+        valid_regions = ['us', 'eu', 'kr', 'tw']
+        if region not in valid_regions:
+            await message.reply_text(f"Invalid region '{region}'. Valid options: {', '.join(valid_regions)}")
+            return
+            
+        search_term = "-".join(parts).lower()
+        logger.info("Parsed /check: version=%s, region=%s, search_term=%s", version, region, search_term)
         
-    region = parts.pop(0).lower()
-    valid_regions = ['us', 'eu', 'kr', 'tw']
-    if region not in valid_regions:
-        await update.message.reply_text(f"Invalid region '{region}'. Valid options: {', '.join(valid_regions)}")
-        return
+        from database import is_realm_index_expired, update_realm_index, find_known_realm
         
-    search_term = "-".join(parts).lower()
-    
-    from database import is_realm_index_expired, update_realm_index, find_known_realm
-    
-    expired = await is_realm_index_expired(region, version)
-    monitor = context.bot_data.get('monitor')
-    
-    if not monitor or not monitor.api:
-        await update.message.reply_text("Bot API is currently unavailable.")
-        return
+        expired = await is_realm_index_expired(region, version)
+        monitor = context.bot_data.get('monitor')
         
-    if expired:
-        import aiohttp
+        if not monitor or not monitor.api:
+            await message.reply_text("Bot API is currently unavailable.")
+            return
+            
+        if expired:
+            async with aiohttp.ClientSession() as session:
+                try:
+                    realms = await monitor.api.fetch_realm_index(session, region, version)
+                    if realms:
+                        await update_realm_index(region, version, realms)
+                except Exception as e:
+                    logger.error("Error updating realm index: %s", e)
+                    
+        match = await find_known_realm(region, version, search_term)
+        logger.info("Database match result: %s", match)
+        if not match:
+            await message.reply_text(
+                f"❌ Realm '{search_term.title()}' not found in {region.upper()} {version.title()}.\n"
+                "Please check your spelling and try again."
+            )
+            return
+            
+        slug, official_name = match
+        official_name = official_name.title()
+        
+        status_msg = await message.reply_text(f"⏳ Checking {region.upper()}-{official_name}...")
+        
         async with aiohttp.ClientSession() as session:
-            realms = await monitor.api.fetch_realm_index(session, region, version)
-            if realms:
-                await update_realm_index(region, version, realms)
-                
-    match = await find_known_realm(region, version, search_term)
-    if not match:
-        await update.message.reply_text(
-            f"❌ Realm '{search_term.title()}' not found in {region.upper()} {version.title()}.\n"
-            "Please check your spelling and try again."
-        )
-        return
+            realm_data, _ = await monitor.api.get_realm_status(session, region, slug, version)
+            
+        if not realm_data:
+            await status_msg.edit_text(f"❌ Failed to fetch data for {region.upper()}-{official_name}.")
+            return
+            
+        status = realm_data.get("status")
         
-    slug, official_name = match
-    official_name = official_name.title()
-    
-    import aiohttp
-    from datetime import datetime, timezone
-    
-    status_msg = await update.message.reply_text(f"⏳ Checking {region.upper()}-{official_name}...")
-    
-    async with aiohttp.ClientSession() as session:
-        realm_data, _ = await monitor.api.get_realm_status(session, region, slug, version)
+        # Localize time
+        user_tz = await get_user_timezone(update.effective_chat.id)
+        try:
+            tz = zoneinfo.ZoneInfo(user_tz)
+        except Exception:
+            tz = zoneinfo.ZoneInfo("UTC")
+            
+        now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+        v_tag = f"[{version.title()}] " if version != "retail" else ""
         
-    if not realm_data:
-        await status_msg.edit_text(f"❌ Failed to fetch data for {region.upper()}-{official_name}.")
-        return
-        
-    status = realm_data.get("status")
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    v_tag = f"[{version.title()}] " if version != "retail" else ""
-    
-    if status == "UP":
-        msg = f"🟢 <b>Realm {v_tag}\"{official_name}\" ({region.upper()}) is ONLINE</b>\n🕐 {now}"
-    else:
-        msg = f"🔴 <b>Realm {v_tag}\"{official_name}\" ({region.upper()}) is OFFLINE</b>\n🕐 {now}"
-        
-    await status_msg.edit_text(msg, parse_mode="HTML")
-
+        if status == "UP":
+            msg = f"🟢 <b>Realm {v_tag}\"{official_name}\" ({region.upper()}) is ONLINE</b>\n🕐 {now}"
+        else:
+            msg = f"🔴 <b>Realm {v_tag}\"{official_name}\" ({region.upper()}) is OFFLINE</b>\n🕐 {now}"
+            
+        await status_msg.edit_text(msg, parse_mode="HTML")
+    except Exception as e:
+        logger.exception("CRITICAL: Exception in check_realm: %s", e)
+        await message.reply_text(f"❌ An error occurred while processing your request.")
 
 def get_bot_handlers():
     """Return an array of handlers to bind to the application."""
+    
+    tz_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_set_timezone, pattern='^start_set_timezone$')],
+        states={
+            AWAITING_TIMEZONE: [
+                CallbackQueryHandler(handle_timezone_choice, pattern='^set_tz_'),
+                CallbackQueryHandler(handle_timezone_choice, pattern='^cancel_tz$'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_timezone_choice)
+            ]
+        },
+        fallbacks=[CommandHandler('cancel', lambda u,c: show_menu(u,c))]
+    )
     
     conv_handler = ConversationHandler(
         entry_points=[
@@ -396,7 +488,7 @@ def get_bot_handlers():
     )
     
     async def unknown_command(update, context):
-        await update.message.reply_text("Sorry, I didn't understand that. Use /menu to manage realms, or /addrealm to add a new one.")
+        await update.effective_message.reply_text("Sorry, I didn't understand that. Use /menu to manage realms, or /addrealm to add a new one.")
 
     return [
         CommandHandler("check", check_realm),
@@ -404,6 +496,7 @@ def get_bot_handlers():
         CommandHandler("menu", show_menu),
         CommandHandler("stats", stats),
         conv_handler,
+        tz_handler,
         CallbackQueryHandler(toggle_bsky, pattern='^toggle_bsky$'),
         CallbackQueryHandler(toggle_wow_bsky, pattern='^toggle_wow_bsky$'),
         CallbackQueryHandler(toggle_classic_bsky, pattern='^toggle_classic_bsky$'),
