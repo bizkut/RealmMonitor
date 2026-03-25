@@ -67,7 +67,12 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "⚙️ **Your Configuration Menu**\n\nConfigure your tracked realms and Blizzard Support Bluesky feed alerts:"
 
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        import telegram.error
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        except telegram.error.BadRequest as e:
+            if "Message is not modified" not in str(e):
+                logger.error("Failed to edit menu: %s", e)
         await update.callback_query.answer()
     else:
         await message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
