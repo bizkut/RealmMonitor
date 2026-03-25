@@ -13,7 +13,8 @@ async def init_db():
         await db.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 chat_id INTEGER PRIMARY KEY,
-                bluesky_pref TEXT DEFAULT 'none' -- 'none', 'maintenance', 'all'
+                bluesky_pref TEXT DEFAULT 'none', -- 'none', 'maintenance', 'all'
+                wow_bluesky_pref TEXT DEFAULT 'none' -- 'none', 'all'
             )
         ''')
         await db.execute('''
@@ -62,7 +63,12 @@ async def init_db():
                 PRIMARY KEY (region, game_version)
             )
         ''')
-        
+        # Migration: Add wow_bluesky_pref to users if missing
+        try:
+            await db.execute('ALTER TABLE users ADD COLUMN wow_bluesky_pref TEXT DEFAULT "none"')
+        except aiosqlite.OperationalError:
+            pass # Column already exists
+            
         await db.commit()
     logger.info("Database initialized at %s", DB_PATH)
 
@@ -76,10 +82,19 @@ async def register_user(chat_id: int):
         await db.commit()
 
 async def update_bluesky_pref(chat_id: int, pref: str):
-    """Update Bluesky preference for a user."""
+    """Update Support Bluesky preference for a user."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             'UPDATE users SET bluesky_pref = ? WHERE chat_id = ?',
+            (pref, chat_id)
+        )
+        await db.commit()
+
+async def update_wow_bluesky_pref(chat_id: int, pref: str):
+    """Update Official WoW Bluesky preference for a user."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            'UPDATE users SET wow_bluesky_pref = ? WHERE chat_id = ?',
             (pref, chat_id)
         )
         await db.commit()
@@ -97,6 +112,24 @@ async def get_bluesky_subscribers(pref_match: list[str]) -> list[int]:
     async with aiosqlite.connect(DB_PATH) as db:
         placeholders = ','.join(['?'] * len(pref_match))
         query = f'SELECT chat_id FROM users WHERE bluesky_pref IN ({placeholders})'
+        async with db.execute(query, pref_match) as cursor:
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows]
+    return []
+
+async def get_wow_bluesky_pref(chat_id: int) -> str:
+    """Get Official WoW Bluesky preference for a user."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute('SELECT wow_bluesky_pref FROM users WHERE chat_id = ?', (chat_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 'none'
+    return 'none'
+
+async def get_wow_bluesky_subscribers(pref_match: list[str]) -> list[int]:
+    """Get all chat_ids subscribed to one of the provided wow_bluesky_pref types."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        placeholders = ','.join(['?'] * len(pref_match))
+        query = f'SELECT chat_id FROM users WHERE wow_bluesky_pref IN ({placeholders})'
         async with db.execute(query, pref_match) as cursor:
             rows = await cursor.fetchall()
             return [r[0] for r in rows]
