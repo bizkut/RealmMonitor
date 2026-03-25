@@ -255,6 +255,87 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
+async def check_realm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check a specific realm's status inline."""
+    if not context.args:
+        await update.message.reply_text("Usage: /check <version>-<region>-<realmname>\nExample: /check retail-us-Frostmourne")
+        return
+        
+    query = " ".join(context.args).strip()
+    parts = query.split("-", 2)
+    
+    if len(parts) < 3:
+        await update.message.reply_text("Invalid format. Use `<version>-<region>-<realmname>` (e.g. `retail-us-Frostmourne`)", parse_mode="Markdown")
+        return
+        
+    version = parts[0].lower()
+    if version == 'sod':
+        version = 'classic-era'
+        
+    valid_versions = ['retail', 'classic', 'classic-era']
+    if version not in valid_versions:
+        await update.message.reply_text(f"Invalid game version '{version}'. Valid options: {', '.join(valid_versions)}")
+        return
+        
+    region = parts[1].lower()
+    valid_regions = ['us', 'eu', 'kr', 'tw']
+    if region not in valid_regions:
+        await update.message.reply_text(f"Invalid region '{region}'. Valid options: {', '.join(valid_regions)}")
+        return
+        
+    search_term = parts[2].lower()
+    
+    from database import is_realm_index_expired, update_realm_index, find_known_realm
+    
+    expired = await is_realm_index_expired(region, version)
+    monitor = context.bot_data.get('monitor')
+    
+    if not monitor or not monitor.api:
+        await update.message.reply_text("Bot API is currently unavailable.")
+        return
+        
+    if expired:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            realms = await monitor.api.fetch_realm_index(session, region, version)
+            if realms:
+                await update_realm_index(region, version, realms)
+                
+    match = await find_known_realm(region, version, search_term)
+    if not match:
+        await update.message.reply_text(
+            f"❌ Realm '{search_term.title()}' not found in {region.upper()} {version.title()}.\n"
+            "Please check your spelling and try again."
+        )
+        return
+        
+    slug, official_name = match
+    official_name = official_name.title()
+    
+    import aiohttp
+    from datetime import datetime, timezone
+    
+    status_msg = await update.message.reply_text(f"⏳ Checking {region.upper()}-{official_name}...")
+    
+    async with aiohttp.ClientSession() as session:
+        realm_data, _ = await monitor.api.get_realm_status(session, region, slug, version)
+        
+    if not realm_data:
+        await status_msg.edit_text(f"❌ Failed to fetch data for {region.upper()}-{official_name}.")
+        return
+        
+    status = realm_data.get("status")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    v_tag = f"[{version.title()}] " if version != "retail" else ""
+    
+    if status == "UP":
+        msg = f"🟢 <b>Realm {v_tag}\"{official_name}\" ({region.upper()}) is ONLINE</b>\n🕐 {now}"
+    else:
+        msg = f"🔴 <b>Realm {v_tag}\"{official_name}\" ({region.upper()}) is OFFLINE</b>\n🕐 {now}"
+        
+    await status_msg.edit_text(msg, parse_mode="HTML")
+
+
 def get_bot_handlers():
     """Return an array of handlers to bind to the application."""
     
@@ -281,6 +362,7 @@ def get_bot_handlers():
         await update.message.reply_text("Sorry, I didn't understand that. Use /menu to manage realms, or /addrealm to add a new one.")
 
     return [
+        CommandHandler("check", check_realm),
         CommandHandler("start", start),
         CommandHandler("menu", show_menu),
         CommandHandler("stats", stats),
