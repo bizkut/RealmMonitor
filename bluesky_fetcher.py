@@ -53,16 +53,38 @@ class BlueskyFetcher:
             new_posts = []
             # Cache current latest to update state at the end
             latest_uri_in_feed = feed.feed[0].post.uri
+            
+            # Use current time/baseline to avoid very old posts
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone.utc)
+            max_age = timedelta(hours=24)
+
             for item in feed.feed:
                 uri = item.post.uri
+                
+                # If we've hit the last seen post, we can stop evaluating older posts
+                if self.last_seen_uri == uri:
+                    break
                 
                 # Skip replies and reposts (original posts only)
                 if item.reply or item.reason:
                     continue
                 
-                # If we've hit the last seen post, we can stop evaluating older posts
-                if self.last_seen_uri == uri:
-                    break
+                # Time-based safety filter: skip posts older than 24h
+                try:
+                    # indexed_at is typically ISO 8601 string: 2024-03-24T16:41:13.123Z
+                    # SDK may return it as string or datetime depending on version
+                    post_time_str = getattr(item.post, 'indexed_at', None)
+                    if isinstance(post_time_str, str):
+                        # Simple parse for UTC (replacing Z with +00:00)
+                        post_time = datetime.fromisoformat(post_time_str.replace('Z', '+00:00'))
+                    else:
+                        post_time = post_time_str # Hopefully a datetime object
+                    
+                    if post_time and (now - post_time) > max_age:
+                        continue
+                except Exception as te:
+                    logger.warning("Could not parse post time for %s: %s", uri, te)
 
                 text = getattr(item.post.record, 'text', '')
                 is_maintenance = "MAINTENANCE SCHEDULE" in text.upper()
