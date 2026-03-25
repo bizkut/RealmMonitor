@@ -103,6 +103,18 @@ async def main():
 
     # Start the services
     await app.initialize()
+    
+    # Register bot commands with Telegram for better discoverability
+    from telegram import BotCommand
+    commands = [
+        BotCommand("start", "Register and show welcome message"),
+        BotCommand("menu", "Manage realms & preferences"),
+        BotCommand("check", "Check realm status (e.g. us-Frostmourne)"),
+        BotCommand("addrealm", "Add a new realm to watchlist"),
+        BotCommand("stats", "Bot statistics (Admin only)")
+    ]
+    await app.bot.set_my_commands(commands)
+
     await app.start()
     await app.updater.start_polling()
 

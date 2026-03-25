@@ -87,7 +87,7 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for region, slug, name, game_version in realms:
         v_tag = f"[{game_version.title().replace('-', ' ')}] "
         keyboard.append([
-            InlineKeyboardButton(f"{v_tag}{region.upper()}-{name.title()}", callback_data="ignore"),
+            InlineKeyboardButton(f"{v_tag}{region.upper()}-{name.title()}", callback_data=f"check_{region}_{slug}_{game_version}"),
             InlineKeyboardButton("❌ Remove", callback_data=f"remove_{region}_{slug}_{game_version}")
         ])
 
@@ -422,8 +422,44 @@ async def check_realm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         slug, official_name = match
         official_name = official_name.title()
         
-        status_msg = await message.reply_text(f"⏳ Checking {region.upper()}-{official_name}...")
+        await perform_manual_check(update, context, region, slug, version, official_name)
+    except Exception as e:
+        logger.exception("CRITICAL: Exception in check_realm: %s", e)
+        await message.reply_text(f"❌ An error occurred while processing your request.")
+
+async def handle_manual_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle manual realm check from menu button."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Format: check_{region}_{slug}_{game_version}
+    parts = query.data.split("_")
+    if len(parts) < 4:
+        return
         
+    region = parts[1]
+    slug = parts[2]
+    game_version = parts[3]
+    
+    # We need the official name for the display
+    from database import find_known_realm
+    match = await find_known_realm(region, game_version, slug)
+    official_name = match[1] if match else slug.replace("-", " ").title()
+    
+    await perform_manual_check(update, context, region, slug, game_version, official_name)
+
+async def perform_manual_check(update: Update, context: ContextTypes.DEFAULT_TYPE, region: str, slug: str, version: str, official_name: str):
+    """Core logic to perform a manual realm status check and reply to the user."""
+    message = update.effective_message
+    monitor = context.bot_data.get('monitor')
+    
+    if not monitor or not monitor.api:
+        await message.reply_text("Bot API is currently unavailable.")
+        return
+        
+    status_msg = await message.reply_text(f"⏳ Checking {region.upper()}-{official_name}...")
+    
+    try:
         async with aiohttp.ClientSession() as session:
             realm_data, _ = await monitor.api.get_realm_status(session, region, slug, version)
             
@@ -441,7 +477,7 @@ async def check_realm(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tz = zoneinfo.ZoneInfo("UTC")
             
         now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
-        v_tag = f"[{version.title()}] " if version != "retail" else ""
+        v_tag = f"[{version.title().replace('-', ' ')}] " if version != "retail" else ""
         
         if status == "UP":
             msg = f"🟢 <b>Realm {v_tag}\"{official_name}\" ({region.upper()}) is ONLINE</b>\n🕐 {now}"
@@ -450,8 +486,8 @@ async def check_realm(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         await status_msg.edit_text(msg, parse_mode="HTML")
     except Exception as e:
-        logger.exception("CRITICAL: Exception in check_realm: %s", e)
-        await message.reply_text(f"❌ An error occurred while processing your request.")
+        logger.error("Error in perform_manual_check: %s", e)
+        await status_msg.edit_text(f"❌ An error occurred while checking {region.upper()}-{official_name}.")
 
 def get_bot_handlers():
     """Return an array of handlers to bind to the application."""
@@ -500,6 +536,7 @@ def get_bot_handlers():
         CallbackQueryHandler(toggle_bsky, pattern='^toggle_bsky$'),
         CallbackQueryHandler(toggle_wow_bsky, pattern='^toggle_wow_bsky$'),
         CallbackQueryHandler(toggle_classic_bsky, pattern='^toggle_classic_bsky$'),
+        CallbackQueryHandler(handle_manual_check, pattern='^check_'),
         CallbackQueryHandler(handle_remove_realm, pattern='^remove_'),
         CallbackQueryHandler(lambda u,c: u.callback_query.answer(), pattern='^ignore$'),
         MessageHandler(filters.TEXT | filters.COMMAND, unknown_command)
