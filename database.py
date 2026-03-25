@@ -104,3 +104,26 @@ async def get_users_for_realm(region: str, slug: str) -> list[int]:
             rows = await cursor.fetchall()
             return [r[0] for r in rows]
     return []
+
+async def get_admin() -> int | None:
+    """Return the first registered user as admin."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute('SELECT chat_id FROM users ORDER BY rowid ASC LIMIT 1') as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+async def get_total_users() -> int:
+    """Return total number of registered users."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute('SELECT COUNT(*) FROM users') as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+    return 0
+
+async def get_total_realms() -> int:
+    """Return total number of tracked realms across all users."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute('SELECT COUNT(*) FROM user_realms') as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+    return 0

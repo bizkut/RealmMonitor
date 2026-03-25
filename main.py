@@ -85,6 +85,7 @@ async def main():
         bot=app.bot,
         bsky_fetcher=bsky_fetcher
     )
+    app.bot_data['monitor'] = monitor
 
     # Start the services
     await app.initialize()

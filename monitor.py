@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
+from datetime import timedelta
 
 import aiohttp
 from telegram import Bot
@@ -26,6 +28,9 @@ class MonitorService:
         
         self._last_status: dict[tuple[str, str], str | None] = {}
         self._running = False
+        self.start_time = time.time()
+        self.blizzard_fetches = 0
+        self.bluesky_fetches = 0
 
     async def broadcast_telegram(self, chat_ids: list[int], message: str):
         """Send a message to multiple users, strictly rate-limited."""
@@ -46,6 +51,7 @@ class MonitorService:
         for region, slug, original_name in unique_realms:
             realm_key = (region, slug)
             try:
+                self.blizzard_fetches += 1
                 realm_data, cache_max_age = await self.api.get_realm_status(session, region, slug)
 
                 if cache_max_age > 0:
@@ -81,6 +87,7 @@ class MonitorService:
 
     async def check_bluesky(self):
         try:
+            self.bluesky_fetches += 1
             posts = await self.bsky.fetch_new_posts()
             for post in posts:
                 if post['is_maintenance']:
@@ -125,3 +132,16 @@ class MonitorService:
 
     def stop(self):
         self._running = False
+
+    def get_stats(self) -> dict:
+        """Calculate and return system stats."""
+        uptime = time.time() - self.start_time
+        up_minutes = max(1.0, float(uptime / 60.0))
+        
+        td = timedelta(seconds=int(uptime))
+        
+        return {
+            "uptime": str(td),
+            "blizzard_rpm": f"{self.blizzard_fetches / up_minutes:.2f}",
+            "bluesky_rpm": f"{self.bluesky_fetches / up_minutes:.2f}"
+        }

@@ -8,7 +8,8 @@ from telegram.ext import (
 
 from database import (
     register_user, get_bluesky_pref, update_bluesky_pref,
-    get_user_realms, add_realm, remove_realm
+    get_user_realms, add_realm, remove_realm,
+    get_admin, get_total_users, get_total_realms
 )
 from blizzard_api import BlizzardAPI
 
@@ -160,6 +161,32 @@ async def cancel_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await show_menu(update, context)
     return ConversationHandler.END
 
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show admin stats."""
+    admin_id = await get_admin()
+    if update.effective_chat.id != admin_id:
+        return
+        
+    monitor = context.bot_data.get('monitor')
+    if not monitor:
+        await update.message.reply_text("Stats are currently unavailable.")
+        return
+        
+    stats_data = monitor.get_stats()
+    total_users = await get_total_users()
+    total_realms = await get_total_realms()
+    
+    msg = (
+        "📊 **Bot Statistics**\n\n"
+        f"⏱ **Uptime:** `{stats_data['uptime']}`\n"
+        f"👥 **Users Tracking:** `{total_users}`\n"
+        f"🌍 **Realms Tracked:** `{total_realms}`\n"
+        f"🔥 **Blizzard RPM:** `{stats_data['blizzard_rpm']}` requests/min\n"
+        f"🐦 **Bluesky RPM:** `{stats_data['bluesky_rpm']}` requests/min"
+    )
+    
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
 
 def get_bot_handlers():
     """Return an array of handlers to bind to the application."""
@@ -185,6 +212,7 @@ def get_bot_handlers():
     return [
         CommandHandler("start", start),
         CommandHandler("menu", show_menu),
+        CommandHandler("stats", stats),
         conv_handler,
         CallbackQueryHandler(toggle_bsky, pattern='^toggle_bsky$'),
         CallbackQueryHandler(handle_remove_realm, pattern='^remove_'),
