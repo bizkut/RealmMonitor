@@ -148,6 +148,33 @@ class BlizzardAPI:
                     pass
         return 0
 
+    async def fetch_realm_index(self, session: aiohttp.ClientSession, region: str, game_version: str) -> list[dict]:
+        """Fetch the complete list of realms for a specific region and game version."""
+        host = REGION_HOSTS.get(region.lower())
+        if not host:
+            return []
+
+        headers = await self._get_headers(session)
+        ns = f"dynamic-classic-{region.lower()}" if game_version == "classic" else (f"dynamic-classic-era-{region.lower()}" if game_version == "classic-era" else f"dynamic-{region.lower()}")
+        params = {"namespace": ns, "locale": "en_US"}
+        url = f"https://{host}/data/wow/realm/index"
+
+        async with session.get(url, params=params, headers=headers) as resp:
+            if resp.status != 200:
+                logger.error("Failed to fetch realm index for %s (%s): HTTP %s", region, game_version, resp.status)
+                return []
+            data = await resp.json()
+            realms = []
+            for r in data.get("realms", []):
+                slug = r.get("slug")
+                name = r.get("name", slug)
+                if isinstance(name, dict):
+                    name = name.get("en_US", slug)
+                if slug:
+                    realms.append({"slug": slug, "name": name})
+            return realms
+        return []
+
     @staticmethod
     def to_slug(realm_name: str) -> str:
         """Convert a realm name to a slug (e.g., 'Area 52' -> 'area-52')."""

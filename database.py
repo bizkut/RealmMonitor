@@ -45,6 +45,24 @@ async def init_db():
                 await db.execute("INSERT INTO user_realms (chat_id, region, slug, name) SELECT chat_id, region, slug, name FROM user_realms_old")
                 await db.execute("DROP TABLE user_realms_old")
         
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS known_realms (
+                region TEXT,
+                game_version TEXT,
+                slug TEXT,
+                name TEXT,
+                PRIMARY KEY (region, game_version, slug)
+            )
+        ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS known_realms_meta (
+                region TEXT,
+                game_version TEXT,
+                last_updated REAL,
+                PRIMARY KEY (region, game_version)
+            )
+        ''')
+        
         await db.commit()
     logger.info("Database initialized at %s", DB_PATH)
 
@@ -139,6 +157,79 @@ async def get_total_users() -> int:
             row = await cursor.fetchone()
             return row[0] if row else 0
     return 0
+
+import time
+
+async def is_realm_index_expired(region: str, game_version: str) -> bool:
+    """Returns True if the known_realms cache for this region/version is older than 24h or missing."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            'SELECT last_updated FROM known_realms_meta WHERE region = ? AND game_version = ?',
+            (region, game_version)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return True
+            last_updated = row[0]
+            # Expire after 24 hours (86400 seconds)
+            if time.time() - last_updated > 86400:
+                return True
+            return False
+
+async def update_realm_index(region: str, game_version: str, realms: list[dict]):
+    """Bulk upsert known realms into the cache and update the meta timestamp."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Clear old cache for this region/version
+        await db.execute(
+            'DELETE FROM known_realms WHERE region = ? AND game_version = ?',
+            (region, game_version)
+        )
+        
+        # Insert new records
+        insert_data = [
+            (region, game_version, r['slug'], r.get('name', r['slug']))
+            for r in realms
+        ]
+        await db.executemany(
+            'INSERT INTO known_realms (region, game_version, slug, name) VALUES (?, ?, ?, ?)',
+            insert_data
+        )
+        
+        # Update meta timestamp
+        await db.execute(
+            '''INSERT INTO known_realms_meta (region, game_version, last_updated) 
+               VALUES (?, ?, ?) 
+               ON CONFLICT(region, game_version) DO UPDATE SET last_updated=excluded.last_updated''',
+            (region, game_version, time.time())
+        )
+        await db.commit()
+
+async def find_known_realm(region: str, game_version: str, search_term: str) -> tuple[str, str] | None:
+    """Search for an exact/case-insensitive match for a realm in the cached index.
+       Returns (slug, official_name) or None."""
+    
+    # Try slug match first
+    search_slug = search_term.strip().lower().replace(" ", "-").replace("'", "")
+    
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            'SELECT slug, name FROM known_realms WHERE region = ? AND game_version = ? AND slug = ?',
+            (region, game_version, search_slug)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return (row[0], row[1])
+                
+        # Try a direct name match (case-insensitive) just in case
+        async with db.execute(
+            'SELECT slug, name FROM known_realms WHERE region = ? AND game_version = ? AND LOWER(name) = ?',
+            (region, game_version, search_term.strip().lower())
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return (row[0], row[1])
+
+    return None
 
 async def get_total_realms() -> int:
     """Return total number of tracked realms across all users."""

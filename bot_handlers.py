@@ -180,14 +180,36 @@ async def handle_realm_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     version = context.user_data.get('adding_version', 'retail')
     region = context.user_data.get('adding_region', 'us')
-    slug = BlizzardAPI.to_slug(search_term)
+    
+    # Process validation
+    from database import is_realm_index_expired, update_realm_index, find_known_realm
+    
+    expired = await is_realm_index_expired(region, version)
+    if expired:
+        monitor = context.bot_data.get('monitor')
+        if monitor and monitor.api:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                realms = await monitor.api.fetch_realm_index(session, region, version)
+                if realms:
+                    await update_realm_index(region, version, realms)
+                    
+    match = await find_known_realm(region, version, search_term)
+    if not match:
+        await update.message.reply_text(
+            f"❌ Realm '{search_term}' not found in {region.upper()} {version.title()}.\n"
+            "Please check your spelling and try again. Use /cancel to abort."
+        )
+        return AWAITING_REALM_NAME
+        
+    slug, official_name = match
     
     chat_id = update.effective_chat.id
     
-    await add_realm(chat_id, region, slug, search_term.title(), version)
+    await add_realm(chat_id, region, slug, official_name, version)
     
     v_tag = f"[{version.title()}] " if version != "retail" else ""
-    await update.message.reply_text(f"✅ Added {v_tag}{region.upper()}-{search_term.title()} to your watchlist.")
+    await update.message.reply_text(f"✅ Added {v_tag}{region.upper()}-{official_name} to your watchlist.")
     await show_menu(update, context)
     return ConversationHandler.END
 
