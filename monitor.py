@@ -26,7 +26,7 @@ class MonitorService:
         self.bot = bot
         self.bsky = bsky_fetcher
         
-        self._last_status: dict[tuple[str, str], str | None] = {}
+        self._last_status: dict[tuple[str, str, str], str | None] = {}
         self._running = False
         self.start_time = time.time()
         self.blizzard_fetches = 0
@@ -48,11 +48,11 @@ class MonitorService:
 
         min_cache_age = FALLBACK_POLL_INTERVAL
 
-        for region, slug, original_name in unique_realms:
-            realm_key = (region, slug)
+        for region, slug, original_name, game_version in unique_realms:
+            realm_key = (region, slug, game_version)
             try:
                 self.blizzard_fetches += 1
-                realm_data, cache_max_age = await self.api.get_realm_status(session, region, slug)
+                realm_data, cache_max_age = await self.api.get_realm_status(session, region, slug, game_version)
 
                 if cache_max_age > 0:
                     min_cache_age = min(min_cache_age, cache_max_age)
@@ -68,20 +68,21 @@ class MonitorService:
 
                 if previous_status is not None and current_status != previous_status:
                     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    v_tag = f"[{game_version.title()}] " if game_version != "retail" else ""
                     if current_status == "UP":
-                        msg = f"🟢 <b>Realm \"{realm_name}\" ({region_upper}) is back ONLINE</b>\n🕐 {now}"
+                        msg = f"🟢 <b>Realm {v_tag}\"{realm_name}\" ({region_upper}) is back ONLINE</b>\n🕐 {now}"
                     else:
-                        msg = f"🔴 <b>Realm \"{realm_name}\" ({region_upper}) went OFFLINE</b>\n🕐 {now}"
+                        msg = f"🔴 <b>Realm {v_tag}\"{realm_name}\" ({region_upper}) went OFFLINE</b>\n🕐 {now}"
                     
-                    logger.info("Status change: %s -> %s for %s-%s", previous_status, current_status, region_upper, slug)
-                    users = await database.get_users_for_realm(region, slug)
+                    logger.info("Status change: %s -> %s for %s-%s (%s)", previous_status, current_status, region_upper, slug, game_version)
+                    users = await database.get_users_for_realm(region, slug, game_version)
                     if users:
                         await self.broadcast_telegram(users, msg)
 
                 self._last_status[realm_key] = current_status
 
             except Exception as e:
-                logger.error("Error checking realm %s-%s: %s", region.upper(), slug, e)
+                logger.error("Error checking realm %s-%s (%s): %s", region.upper(), slug, game_version, e)
 
         return max(min_cache_age, MIN_POLL_INTERVAL)
 

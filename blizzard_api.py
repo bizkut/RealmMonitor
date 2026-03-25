@@ -51,18 +51,21 @@ class BlizzardAPI:
         return {"Authorization": f"Bearer {token}"}
 
     async def _resolve_realm_id(
-        self, session: aiohttp.ClientSession, region: str, realm_slug: str
+        self, session: aiohttp.ClientSession, region: str, realm_slug: str, game_version: str
     ) -> int | None:
         """Look up the connected realm ID for a given realm slug."""
-        if realm_slug in self._realm_id_cache:
-            return self._realm_id_cache[realm_slug]
+        cache_key = f"{region}_{realm_slug}_{game_version}"
+        if cache_key in self._realm_id_cache:
+            return self._realm_id_cache[cache_key]
 
         host = REGION_HOSTS[region]
         headers = await self._get_headers(session)
 
         # Use the realm endpoint to get the connected realm ID
         url = f"https://{host}/data/wow/realm/{realm_slug}"
-        params = {"namespace": f"dynamic-{region}", "locale": "en_US"}
+        
+        ns = f"dynamic-classic-{region}" if game_version == "classic" else (f"dynamic-classic-era-{region}" if game_version == "classic-era" else f"dynamic-{region}")
+        params = {"namespace": ns, "locale": "en_US"}
 
         async with session.get(url, params=params, headers=headers) as resp:
             if resp.status != 200:
@@ -73,15 +76,15 @@ class BlizzardAPI:
             # Extract ID from href like .../connected-realm/3725?namespace=...
             try:
                 cr_id = int(cr_href.split("/connected-realm/")[1].split("?")[0])
-                self._realm_id_cache[realm_slug] = cr_id
-                logger.info("Resolved realm '%s' -> connected realm ID %d", realm_slug, cr_id)
+                self._realm_id_cache[cache_key] = cr_id
+                logger.info("Resolved realm '%s' (%s) -> connected realm ID %d", realm_slug, game_version, cr_id)
                 return cr_id
             except (IndexError, ValueError):
                 logger.error("Could not parse connected realm ID from: %s", cr_href)
                 return None
 
     async def get_realm_status(
-        self, session: aiohttp.ClientSession, region: str, realm_slug: str
+        self, session: aiohttp.ClientSession, region: str, realm_slug: str, game_version: str = "retail"
     ) -> tuple[dict | None, int]:
         """
         Get the status of a specific realm.
@@ -95,13 +98,15 @@ class BlizzardAPI:
             raise ValueError(f"Unknown region: {region}. Use: {list(REGION_HOSTS.keys())}")
 
         # Resolve the connected realm ID
-        cr_id = await self._resolve_realm_id(session, region.lower(), realm_slug)
+        cr_id = await self._resolve_realm_id(session, region.lower(), realm_slug, game_version)
         if cr_id is None:
             return None, 0
 
         headers = await self._get_headers(session)
         url = f"https://{host}/data/wow/connected-realm/{cr_id}"
-        params = {"namespace": f"dynamic-{region.lower()}", "locale": "en_US"}
+        
+        ns = f"dynamic-classic-{region.lower()}" if game_version == "classic" else (f"dynamic-classic-era-{region.lower()}" if game_version == "classic-era" else f"dynamic-{region.lower()}")
+        params = {"namespace": ns, "locale": "en_US"}
 
         async with session.get(url, params=params, headers=headers) as resp:
             cache_max_age = self._parse_cache_max_age(resp.headers)

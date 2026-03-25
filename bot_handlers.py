@@ -20,8 +20,9 @@ from blizzard_api import BlizzardAPI
 logger = logging.getLogger(__name__)
 
 # States for ConversationHandler
-AWAITING_REGION = 1
-AWAITING_REALM_NAME = 2
+AWAITING_VERSION = 1
+AWAITING_REGION = 2
+AWAITING_REALM_NAME = 3
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler. Registers user and shows welcome menu."""
@@ -55,10 +56,11 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(f"🐦 Support Feed: {bsky_display}", callback_data="toggle_bsky")]
     ]
     
-    for region, slug, name in realms:
+    for region, slug, name, game_version in realms:
+        v_tag = f"[{game_version.title()}] " if game_version != "retail" else ""
         keyboard.append([
-            InlineKeyboardButton(f"{region.upper()}-{name}", callback_data="ignore"),
-            InlineKeyboardButton("❌ Remove", callback_data=f"remove_{region}_{slug}")
+            InlineKeyboardButton(f"{v_tag}{region.upper()}-{name}", callback_data="ignore"),
+            InlineKeyboardButton("❌ Remove", callback_data=f"remove_{region}_{slug}_{game_version}")
         ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -90,10 +92,10 @@ async def handle_remove_realm(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     chat_id = update.effective_chat.id
     
-    parts = query.data.split('_', 2)
-    if len(parts) == 3:
-        _, region, slug = parts
-        await remove_realm(chat_id, region, slug)
+    parts = query.data.split('_', 3)
+    if len(parts) == 4:
+        _, region, slug, game_version = parts
+        await remove_realm(chat_id, region, slug, game_version)
         await query.answer(f"Removed realm!")
         await show_menu(update, context)
     else:
@@ -101,13 +103,38 @@ async def handle_remove_realm(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def start_add_realm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Prompt user to select a region."""
+    """Prompt user to select a game version."""
     if update.callback_query:
         await update.callback_query.answer()
         message = update.callback_query.message
     else:
         message = update.message
         
+    version_keyboard = [
+        [
+            InlineKeyboardButton("Retail", callback_data="selectversion_retail"),
+            InlineKeyboardButton("Classic", callback_data="selectversion_classic")
+        ],
+        [
+            InlineKeyboardButton("Classic Era / SoD", callback_data="selectversion_classic-era")
+        ]
+    ]
+    
+    await message.reply_text(
+        "Which Game Version is the realm in?\n"
+        "Type /cancel to abort.",
+        reply_markup=InlineKeyboardMarkup(version_keyboard)
+    )
+    return AWAITING_VERSION
+
+async def select_version(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle game version selection, prompt for region."""
+    query = update.callback_query
+    await query.answer()
+    
+    version = query.data.split('_')[1]
+    context.user_data['adding_version'] = version
+    
     region_keyboard = [
         [
             InlineKeyboardButton("US", callback_data="selectregion_us"),
@@ -119,10 +146,13 @@ async def start_add_realm(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ]
     ]
     
-    await message.reply_text(
+    v_display = version.title().replace('-', ' ')
+    await query.message.reply_text(
+        f"Selected **{v_display}**.\n"
         "Which region is the realm in?\n"
         "Type /cancel to abort.",
-        reply_markup=InlineKeyboardMarkup(region_keyboard)
+        reply_markup=InlineKeyboardMarkup(region_keyboard),
+        parse_mode="Markdown"
     )
     return AWAITING_REGION
 
@@ -136,7 +166,7 @@ async def select_region(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     await query.message.reply_text(
         f"You selected {region.upper()}.\n"
-        "Please type the name of the realm you want to add (e.g. 'Frostmourne').\n"
+        "Please type the name of the realm you want to add (e.g. 'Frostmourne', 'Arugal').\n"
         "Type /cancel to abort."
     )
     return AWAITING_REALM_NAME
@@ -148,14 +178,16 @@ async def handle_realm_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if search_term == '/cancel':
         return await cancel_add(update, context)
 
+    version = context.user_data.get('adding_version', 'retail')
     region = context.user_data.get('adding_region', 'us')
     slug = BlizzardAPI.to_slug(search_term)
     
     chat_id = update.effective_chat.id
     
-    await add_realm(chat_id, region, slug, search_term.title())
+    await add_realm(chat_id, region, slug, search_term.title(), version)
     
-    await update.message.reply_text(f"✅ Added {region.upper()}-{search_term.title()} to your watchlist.")
+    v_tag = f"[{version.title()}] " if version != "retail" else ""
+    await update.message.reply_text(f"✅ Added {v_tag}{region.upper()}-{search_term.title()} to your watchlist.")
     await show_menu(update, context)
     return ConversationHandler.END
 
@@ -201,6 +233,10 @@ def get_bot_handlers():
             CommandHandler('addrealm', start_add_realm)
         ],
         states={
+            AWAITING_VERSION: [
+                CallbackQueryHandler(select_version, pattern='^selectversion_'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, cancel_add)
+            ],
             AWAITING_REGION: [
                 CallbackQueryHandler(select_region, pattern='^selectregion_'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cancel_add)
