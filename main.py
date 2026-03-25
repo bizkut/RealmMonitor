@@ -110,8 +110,7 @@ async def main():
         BotCommand("start", "Register and show welcome message"),
         BotCommand("menu", "Manage realms & preferences"),
         BotCommand("check", "Check realm status (e.g. us-Frostmourne)"),
-        BotCommand("addrealm", "Add a new realm to watchlist"),
-        BotCommand("stats", "Bot statistics (Admin only)")
+        BotCommand("addrealm", "Add a new realm to watchlist")
     ]
     await app.bot.set_my_commands(commands)
 
