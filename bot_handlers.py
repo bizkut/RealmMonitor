@@ -57,7 +57,7 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     for region, slug, name, game_version in realms:
-        v_tag = f"[{game_version.title()}] " if game_version != "retail" else ""
+        v_tag = f"[{game_version.title().replace('-', ' ')}] "
         keyboard.append([
             InlineKeyboardButton(f"{v_tag}{region.upper()}-{name.title()}", callback_data="ignore"),
             InlineKeyboardButton("❌ Remove", callback_data=f"remove_{region}_{slug}_{game_version}")
