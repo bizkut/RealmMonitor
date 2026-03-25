@@ -63,7 +63,7 @@ class MonitorService:
                 current_status = realm_data["status"]
                 previous_status = self._last_status.get(realm_key)
                 
-                realm_name = realm_data.get("name", original_name)
+                realm_name = str(realm_data.get("name", original_name)).title()
                 region_upper = region.upper()
 
                 if previous_status is not None and current_status != previous_status:
