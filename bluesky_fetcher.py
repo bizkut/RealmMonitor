@@ -62,10 +62,17 @@ class BlueskyFetcher:
                 text = getattr(item.post.record, 'text', '')
                 is_maintenance = "MAINTENANCE SCHEDULE" in text.upper()
                 
+                # Extract rkey from uri: at://did:.../app.bsky.feed.post/rkey
+                rkey = uri.split('/')[-1]
+                author_handle = getattr(item.post.author, 'handle', self.target_account)
+                post_url = f"https://bsky.app/profile/{author_handle}/post/{rkey}"
+                
                 new_posts.append({
                     'uri': uri,
                     'text': text,
-                    'is_maintenance': is_maintenance
+                    'is_maintenance': is_maintenance,
+                    'post_url': post_url,
+                    'author_name': getattr(item.post.author, 'display_name', self.target_account)
                 })
 
             # The feed is sorted newest first. 

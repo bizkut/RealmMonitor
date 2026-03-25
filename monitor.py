@@ -113,10 +113,10 @@ class MonitorService:
                             tz = zoneinfo.ZoneInfo("UTC")
                         now_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
                         msg = (
-                            f"🐦 <b>Blizzard Support Update</b>\n\n"
+                            f"🐦 <b>{post['author_name']} Update</b>\n\n"
                             f"{post['text']}\n\n"
                             f"🕐 {now_local}\n"
-                            f"👉 <a href='https://bsky.app/profile/support.blizzard.com'>View on Bluesky</a>"
+                            f"👉 <a href='{post['post_url']}'>View on Bluesky</a>"
                         )
                         await self.broadcast_telegram(user_group, msg)
         except Exception as e:
@@ -139,10 +139,10 @@ class MonitorService:
                             tz = zoneinfo.ZoneInfo("UTC")
                         now_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
                         msg = (
-                            f"🗡 <b>Official WoW Update</b>\n\n"
+                            f"🗡 <b>{post['author_name']} Update</b>\n\n"
                             f"{post['text']}\n\n"
                             f"🕐 {now_local}\n"
-                            f"👉 <a href='https://bsky.app/profile/worldofwarcraft.blizzard.com'>View on Bluesky</a>"
+                            f"👉 <a href='{post['post_url']}'>View on Bluesky</a>"
                         )
                         await self.broadcast_telegram(user_group, msg)
         except Exception as e:
@@ -166,10 +166,10 @@ class MonitorService:
                             tz = zoneinfo.ZoneInfo("UTC")
                         now_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
                         msg = (
-                            f"🛡 <b>WoW Classic Devs Update</b>\n\n"
+                            f"🛡 <b>{post['author_name']} Update</b>\n\n"
                             f"{post['text']}\n\n"
                             f"🕐 {now_local}\n"
-                            f"👉 <a href='https://bsky.app/profile/wowclassicdevs.blizzard.com'>View on Bluesky</a>"
+                            f"👉 <a href='{post['post_url']}'>View on Bluesky</a>"
                         )
                         await self.broadcast_telegram(user_group, msg)
         except Exception as e:
