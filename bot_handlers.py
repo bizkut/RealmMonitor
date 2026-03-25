@@ -1,10 +1,14 @@
 import asyncio
 import logging
+import warnings
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
     ContextTypes, CommandHandler, CallbackQueryHandler, 
     MessageHandler, filters, ConversationHandler
 )
+from telegram.warnings import PTBUserWarning
+
+warnings.filterwarnings("ignore", category=PTBUserWarning)
 
 from database import (
     register_user, get_bluesky_pref, update_bluesky_pref,
