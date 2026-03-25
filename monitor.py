@@ -98,7 +98,10 @@ class MonitorService:
         try:
             self.bluesky_fetches += 1
             posts = await self.bsky.fetch_new_posts()
+            if posts:
+                logger.info("Found %d new posts from %s", len(posts), self.bsky.target_account)
             for post in posts:
+                logger.info("Processing post from %s: %s...", post['author_name'], post['text'][:50])
                 if post['is_maintenance']:
                     targets = await database.get_bluesky_subscribers(['maintenance', 'all'])
                 else:
@@ -131,7 +134,10 @@ class MonitorService:
         try:
             self.bluesky_fetches += 1
             posts = await self.bsky_wow.fetch_new_posts()
+            if posts:
+                logger.info("Found %d new posts from %s", len(posts), self.bsky_wow.target_account)
             for post in posts:
+                logger.info("Processing post from %s: %s...", post['author_name'], post['text'][:50])
                 targets = await database.get_wow_bluesky_subscribers(['all'])
                 
                 if targets:
@@ -162,7 +168,10 @@ class MonitorService:
         try:
             self.bluesky_fetches += 1
             posts = await self.bsky_classic.fetch_new_posts()
+            if posts:
+                logger.info("Found %d new posts from %s", len(posts), self.bsky_classic.target_account)
             for post in posts:
+                logger.info("Processing post from %s: %s...", post['author_name'], post['text'][:50])
                 targets = await database.get_classic_bluesky_subscribers(['all'])
                 
                 if targets:
