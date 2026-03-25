@@ -42,6 +42,9 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     message = update.message if update.message else update.callback_query.message
     
+    # Ensure user exists before displaying/modifying preferences
+    await register_user(chat_id)
+    
     realms = await get_user_realms(chat_id)
     bsky_pref = await get_bluesky_pref(chat_id)
     
