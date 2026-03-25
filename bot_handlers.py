@@ -13,6 +13,7 @@ warnings.filterwarnings("ignore", category=PTBUserWarning)
 from database import (
     register_user, get_bluesky_pref, update_bluesky_pref,
     get_wow_bluesky_pref, update_wow_bluesky_pref,
+    get_classic_bluesky_pref, update_classic_bluesky_pref,
     get_user_realms, add_realm, remove_realm,
     get_admin, get_total_users, get_total_realms
 )
@@ -49,6 +50,7 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     realms = await get_user_realms(chat_id)
     bsky_pref = await get_bluesky_pref(chat_id)
     wow_bsky_pref = await get_wow_bluesky_pref(chat_id)
+    classic_bsky_pref = await get_classic_bluesky_pref(chat_id)
     
     bsky_display = {
         'none': '🔕 Off',
@@ -61,10 +63,16 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'all': '📢 All Feeds'
     }.get(wow_bsky_pref, 'Off')
 
+    classic_bsky_display = {
+        'none': '🔕 Off',
+        'all': '📢 All Feeds'
+    }.get(classic_bsky_pref, 'Off')
+
     keyboard = [
         [InlineKeyboardButton("➕ Add Realm", callback_data="add_realm")],
-        [InlineKeyboardButton(f"🐦 Support Feed: {bsky_display}", callback_data="toggle_bsky")],
-        [InlineKeyboardButton(f"🗡 WoW Feed: {wow_bsky_display}", callback_data="toggle_wow_bsky")]
+        [InlineKeyboardButton(f"🐦 Support: {bsky_display}", callback_data="toggle_bsky")],
+        [InlineKeyboardButton(f"🗡 WoW: {wow_bsky_display}", callback_data="toggle_wow_bsky")],
+        [InlineKeyboardButton(f"🛡 Classic: {classic_bsky_display}", callback_data="toggle_classic_bsky")]
     ]
     
     for region, slug, name, game_version in realms:
@@ -112,6 +120,17 @@ async def toggle_wow_bsky(update: Update, context: ContextTypes.DEFAULT_TYPE):
     next_pref = 'none' if current_pref == 'all' else 'all'
     
     await update_wow_bluesky_pref(chat_id, next_pref)
+    await show_menu(update, context)
+
+async def toggle_classic_bsky(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle the WoW Classic Devs bluesky preference."""
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    
+    current_pref = await get_classic_bluesky_pref(chat_id)
+    next_pref = 'none' if current_pref == 'all' else 'all'
+    
+    await update_classic_bluesky_pref(chat_id, next_pref)
     await show_menu(update, context)
 
 async def handle_remove_realm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -387,6 +406,7 @@ def get_bot_handlers():
         conv_handler,
         CallbackQueryHandler(toggle_bsky, pattern='^toggle_bsky$'),
         CallbackQueryHandler(toggle_wow_bsky, pattern='^toggle_wow_bsky$'),
+        CallbackQueryHandler(toggle_classic_bsky, pattern='^toggle_classic_bsky$'),
         CallbackQueryHandler(handle_remove_realm, pattern='^remove_'),
         CallbackQueryHandler(lambda u,c: u.callback_query.answer(), pattern='^ignore$'),
         MessageHandler(filters.TEXT | filters.COMMAND, unknown_command)

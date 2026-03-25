@@ -85,12 +85,19 @@ async def main():
         app_password=config["BLUESKY_APP_PASSWORD"],
         target_account="worldofwarcraft.blizzard.com"
     )
+    
+    bsky_classic_fetcher = BlueskyFetcher(
+        handle=config["BLUESKY_EMAIL"],
+        app_password=config["BLUESKY_APP_PASSWORD"],
+        target_account="wowclassicdevs.blizzard.com"
+    )
 
     monitor = MonitorService(
         blizzard_api=api,
         bot=app.bot,
         bsky_fetcher=bsky_fetcher,
-        bsky_wow_fetcher=bsky_wow_fetcher
+        bsky_wow_fetcher=bsky_wow_fetcher,
+        bsky_classic_fetcher=bsky_classic_fetcher
     )
     app.bot_data['monitor'] = monitor
 

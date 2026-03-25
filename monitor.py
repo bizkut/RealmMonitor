@@ -21,11 +21,12 @@ BLUESKY_POLL_INTERVAL = 300
 class MonitorService:
     """Monitors WoW realm statuses and Bluesky updates."""
 
-    def __init__(self, blizzard_api: BlizzardAPI, bot: Bot, bsky_fetcher: BlueskyFetcher, bsky_wow_fetcher: BlueskyFetcher = None):
+    def __init__(self, blizzard_api: BlizzardAPI, bot: Bot, bsky_fetcher: BlueskyFetcher, bsky_wow_fetcher: BlueskyFetcher = None, bsky_classic_fetcher: BlueskyFetcher = None):
         self.api = blizzard_api
         self.bot = bot
         self.bsky = bsky_fetcher
         self.bsky_wow = bsky_wow_fetcher
+        self.bsky_classic = bsky_classic_fetcher
         
         self._last_status: dict[tuple[str, str, str], str | None] = {}
         self._running = False
@@ -126,6 +127,25 @@ class MonitorService:
                     await self.broadcast_telegram(targets, msg)
         except Exception as e:
             logger.error("Error checking WoW Bluesky: %s", e)
+            
+    async def check_classic_bluesky(self):
+        if not self.bsky_classic:
+            return
+        try:
+            self.bluesky_fetches += 1
+            posts = await self.bsky_classic.fetch_new_posts()
+            for post in posts:
+                targets = await database.get_classic_bluesky_subscribers(['all'])
+                
+                if targets:
+                    msg = (
+                        f"🛡 <b>WoW Classic Devs Update</b>\n\n"
+                        f"{post['text']}\n\n"
+                        f"👉 <a href='https://bsky.app/profile/wowclassicdevs.blizzard.com'>View on Bluesky</a>"
+                    )
+                    await self.broadcast_telegram(targets, msg)
+        except Exception as e:
+            logger.error("Error checking Classic Bluesky: %s", e)
     async def _realm_loop(self):
         async with aiohttp.ClientSession() as session:
             # First check purely populates the baseline state if we just restarted
@@ -138,6 +158,7 @@ class MonitorService:
         while self._running:
             await self.check_bluesky()
             await self.check_wow_bluesky()
+            await self.check_classic_bluesky()
             await asyncio.sleep(BLUESKY_POLL_INTERVAL)
 
     async def run(self):

@@ -10,7 +10,10 @@ You can use the public, ready-to-use Telegram bot directly here: **[@wowrealm_bo
 - 👥 **Multi-User Personalized Alerts** — every user can configure their own list of realms to monitor via an interactive Telegram menu (`/menu`).
 - 🔔 **Instant Realm Notifications** — alerts when your specific realms go offline or come back online.
 - ⚡ **Live Inline Checking** — instantaneously peek at the status of a specific server without adding it to your watchlist using `/check [version]-<region>-<realmname>` (e.g. `/check us-Frostmourne` or `/check classic-eu-Firemaw`). Retail is the default if the version is omitted.
-- 🐦 **Bluesky Integration** — optionally receive posts from `support.blizzard.com` via ATProto (choose "Maintenance Only" or "All Feeds").
+- 🐦 **Bluesky Integration** — optionally receive posts from three official Blizzard profiles directly in Telegram:
+  - **Support Feed** (`support.blizzard.com`) alerts for server maintenance and outages.
+  - **Official WoW Feed** (`worldofwarcraft.blizzard.com`) for retail announcements.
+  - **Classic Devs Feed** (`wowclassicdevs.blizzard.com`) for WoW Classic ecosystem updates.
 - ⏱ **Smart caching & Rate Limiting** — perfectly batches realm API requests so checking for thousands of users only requires one API call per realm, safely throttling Telegram broadcasts to avoid rate limits.
 - 🐳 **Docker ready** — run anywhere with Docker Compose and a persistent SQLite database.
 
