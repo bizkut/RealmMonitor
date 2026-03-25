@@ -7,12 +7,12 @@ logger = logging.getLogger(__name__)
 class BlueskyFetcher:
     """Fetches updates from a specific Bluesky account using ATProto."""
 
-    def __init__(self, handle: str, app_password: str, target_account: str = "support.blizzard.com"):
+    def __init__(self, handle: str, app_password: str, target_account: str = "support.blizzard.com", last_seen_uri: str = None):
         self.handle = handle
         self.app_password = app_password
         self.target_account = target_account
         self.client = AsyncClient()
-        self.last_seen_uri = None
+        self.last_seen_uri = last_seen_uri
         self._authenticated = False
 
     async def authenticate(self):
@@ -46,12 +46,13 @@ class BlueskyFetcher:
                 return []
 
             if self.last_seen_uri is None:
-                # On first run, don't alert on old posts, just set the baseline
+                # On first run (if no persistent state), don't alert on old posts, just set baseline
                 self.last_seen_uri = feed.feed[0].post.uri
-                # We also assume we don't want to alert on startup, so return []
                 return []
 
             new_posts = []
+            # Cache current latest to update state at the end
+            latest_uri_in_feed = feed.feed[0].post.uri
             for item in feed.feed:
                 uri = item.post.uri
                 
@@ -83,9 +84,9 @@ class BlueskyFetcher:
             # We want to process them chronologically (oldest new post first).
             new_posts.reverse()
 
-            if new_posts:
-                # Update the last seen URI to the most recent one
-                self.last_seen_uri = feed.feed[0].post.uri
+            # Always update the last seen URI to the most recent one we've encountered
+            if feed.feed:
+                self.last_seen_uri = latest_uri_in_feed
 
             return new_posts
 

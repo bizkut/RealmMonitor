@@ -29,6 +29,12 @@ async def init_db():
                 PRIMARY KEY (chat_id, region, slug, game_version)
             )
         ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS bluesky_state (
+                target_account TEXT PRIMARY KEY,
+                last_seen_uri TEXT
+            )
+        ''')
         
         # Migration: Add game_version to existing tables if missing and recreate constraint
         async with db.execute("PRAGMA table_info(user_realms)") as cursor:
@@ -210,6 +216,24 @@ async def get_users_by_timezone(chat_ids: list[int]) -> dict[str, list[int]]:
                 tz_map[tz].append(cid)
             return tz_map
     return {}
+
+async def get_bluesky_state(target_account: str) -> str | None:
+    """Get the last seen URI for a Bluesky account."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute('SELECT last_seen_uri FROM bluesky_state WHERE target_account = ?', (target_account,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+async def update_bluesky_state(target_account: str, uri: str):
+    """Update the last seen URI for a Bluesky account."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            '''INSERT INTO bluesky_state (target_account, last_seen_uri) 
+               VALUES (?, ?) 
+               ON CONFLICT(target_account) DO UPDATE SET last_seen_uri=excluded.last_seen_uri''',
+            (target_account, uri)
+        )
+        await db.commit()
 
 async def add_realm(chat_id: int, region: str, slug: str, name: str, game_version: str = 'retail'):
     """Add a realm to the user's monitor list."""

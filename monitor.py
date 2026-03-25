@@ -119,6 +119,10 @@ class MonitorService:
                             f"👉 <a href='{post['post_url']}'>View on Bluesky</a>"
                         )
                         await self.broadcast_telegram(user_group, msg)
+
+            # Persist state
+            if self.bsky.last_seen_uri:
+                await database.update_bluesky_state(self.bsky.target_account, self.bsky.last_seen_uri)
         except Exception as e:
             logger.error("Error checking Bluesky: %s", e)
     async def check_wow_bluesky(self):
@@ -145,6 +149,10 @@ class MonitorService:
                             f"👉 <a href='{post['post_url']}'>View on Bluesky</a>"
                         )
                         await self.broadcast_telegram(user_group, msg)
+
+            # Persist state
+            if self.bsky_wow.last_seen_uri:
+                await database.update_bluesky_state(self.bsky_wow.target_account, self.bsky_wow.last_seen_uri)
         except Exception as e:
             logger.error("Error checking WoW Bluesky: %s", e)
             
@@ -172,6 +180,10 @@ class MonitorService:
                             f"👉 <a href='{post['post_url']}'>View on Bluesky</a>"
                         )
                         await self.broadcast_telegram(user_group, msg)
+
+            # Persist state
+            if self.bsky_classic.last_seen_uri:
+                await database.update_bluesky_state(self.bsky_classic.target_account, self.bsky_classic.last_seen_uri)
         except Exception as e:
             logger.error("Error checking Classic Bluesky: %s", e)
     async def _realm_loop(self):
