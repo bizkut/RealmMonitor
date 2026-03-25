@@ -4,11 +4,16 @@ import asyncio
 import logging
 import os
 import sys
+import signal
 
 from dotenv import load_dotenv
+from telegram.ext import Application
 
+import database
 from blizzard_api import BlizzardAPI
-from monitor import RealmMonitor
+from bluesky_fetcher import BlueskyFetcher
+from monitor import MonitorService
+from bot_handlers import get_bot_handlers
 
 # Configure logging
 logging.basicConfig(
@@ -27,8 +32,8 @@ def load_config() -> dict:
         "BLIZZARD_CLIENT_ID",
         "BLIZZARD_CLIENT_SECRET",
         "TELEGRAM_BOT_TOKEN",
-        "TELEGRAM_CHAT_ID",
-        "REALMS",
+        "BLUESKY_EMAIL",
+        "BLUESKY_APP_PASSWORD",
     ]
 
     config = {}
@@ -42,63 +47,73 @@ def load_config() -> dict:
 
     if missing:
         logger.error("Missing required config keys: %s", ", ".join(missing))
-        logger.error("Please fill in your .env file. See .env.example for reference.")
+        logger.error("Please fill in your .env file.")
         sys.exit(1)
 
-    # Parse realms into (region, slug, name)
-    raw_realms = [r.strip() for r in config["REALMS"].split(",") if r.strip()]
-    if not raw_realms:
-        logger.error("REALMS must contain at least one realm in REGION-RealmName format.")
-        sys.exit(1)
-
-    parsed_realms = []
-    for raw in raw_realms:
-        if "-" not in raw:
-            logger.error("Invalid format for realm '%s'. Must be REGION-RealmName (e.g. US-Frostmourne)", raw)
-            sys.exit(1)
-        
-        region, name = raw.split("-", 1)
-        region = region.strip().lower()
-        if region not in ["us", "eu", "kr", "tw"]:
-            logger.error("Invalid region '%s' for realm '%s'. Valid regions: us, eu, kr, tw", region, raw)
-            sys.exit(1)
-            
-        slug = BlizzardAPI.to_slug(name)
-        parsed_realms.append((region, slug, name.strip()))
-
-    config["PARSED_REALMS"] = parsed_realms
     return config
 
 
 async def main():
-    """Initialize and run the realm monitor."""
+    """Initialize and run the realm monitor & Telegram bot."""
     config = load_config()
 
-    logger.info("=== WoW Realm Monitor ===")
+    logger.info("=== WoW Realm Monitor Multi-User ===")
     
-    realm_display = [f"{r[0].upper()}-{r[2]}" for r in config["PARSED_REALMS"]]
-    logger.info("Monitoring Realms: %s", ", ".join(realm_display))
+    # Initialize SQLite database
+    await database.init_db()
 
+    # Build Telegram Application
+    app = Application.builder().token(config["TELEGRAM_BOT_TOKEN"]).build()
+    
+    # Register handlers
+    for handler in get_bot_handlers():
+        app.add_handler(handler)
+
+    # Initialize APIs
     api = BlizzardAPI(
         client_id=config["BLIZZARD_CLIENT_ID"],
         client_secret=config["BLIZZARD_CLIENT_SECRET"],
     )
-
-    monitor = RealmMonitor(
-        blizzard_api=api,
-        telegram_token=config["TELEGRAM_BOT_TOKEN"],
-        chat_id=config["TELEGRAM_CHAT_ID"],
-        realms=config["PARSED_REALMS"],
+    
+    bsky_fetcher = BlueskyFetcher(
+        handle=config["BLUESKY_EMAIL"],
+        app_password=config["BLUESKY_APP_PASSWORD"]
     )
 
+    monitor = MonitorService(
+        blizzard_api=api,
+        bot=app.bot,
+        bsky_fetcher=bsky_fetcher
+    )
+
+    # Start the services
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    monitor_task = asyncio.create_task(monitor.run())
+
+    # Wait until interrupted
+    stop_signal = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop_signal.set)
+        except NotImplementedError:
+            pass
+
     try:
-        await monitor.run()
+        await stop_signal.wait()
     except KeyboardInterrupt:
+        pass
+    finally:
         logger.info("Shutting down...")
         monitor.stop()
-    except Exception as e:
-        logger.error("Fatal error: %s", e)
-        sys.exit(1)
+        if not monitor_task.done():
+            await monitor_task
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
 
 
 if __name__ == "__main__":

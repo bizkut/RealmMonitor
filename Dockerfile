@@ -5,6 +5,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY blizzard_api.py monitor.py main.py ./
+COPY . .
 
 CMD ["python", "-u", "main.py"]
