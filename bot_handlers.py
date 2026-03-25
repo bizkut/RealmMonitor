@@ -197,12 +197,13 @@ async def handle_realm_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     match = await find_known_realm(region, version, search_term)
     if not match:
         await update.message.reply_text(
-            f"❌ Realm '{search_term}' not found in {region.upper()} {version.title()}.\n"
+            f"❌ Realm '{search_term.title()}' not found in {region.upper()} {version.title()}.\n"
             "Please check your spelling and try again. Use /cancel to abort."
         )
         return AWAITING_REALM_NAME
         
     slug, official_name = match
+    official_name = official_name.title()
     
     chat_id = update.effective_chat.id
     
