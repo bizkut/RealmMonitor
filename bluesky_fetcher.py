@@ -55,6 +55,10 @@ class BlueskyFetcher:
             for item in feed.feed:
                 uri = item.post.uri
                 
+                # Skip replies and reposts (original posts only)
+                if item.reply or item.reason:
+                    continue
+                
                 # If we've hit the last seen post, we can stop evaluating older posts
                 if self.last_seen_uri == uri:
                     break
