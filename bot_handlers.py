@@ -262,28 +262,27 @@ async def check_realm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     query = " ".join(context.args).strip()
-    parts = query.split("-", 2)
+    parts = query.split("-")
     
-    if len(parts) < 3:
-        await update.message.reply_text("Invalid format. Use `<version>-<region>-<realmname>` (e.g. `retail-us-Frostmourne`)", parse_mode="Markdown")
+    valid_versions = ['retail', 'classic', 'classic-era', 'sod']
+    if parts[0].lower() in valid_versions:
+        version = parts.pop(0).lower()
+        if version == 'sod':
+            version = 'classic-era'
+    else:
+        version = 'retail'
+        
+    if len(parts) < 2:
+        await update.message.reply_text("Invalid format. Use `[version]-<region>-<realmname>` (e.g. `us-Frostmourne` or `classic-eu-Firemaw`)", parse_mode="Markdown")
         return
         
-    version = parts[0].lower()
-    if version == 'sod':
-        version = 'classic-era'
-        
-    valid_versions = ['retail', 'classic', 'classic-era']
-    if version not in valid_versions:
-        await update.message.reply_text(f"Invalid game version '{version}'. Valid options: {', '.join(valid_versions)}")
-        return
-        
-    region = parts[1].lower()
+    region = parts.pop(0).lower()
     valid_regions = ['us', 'eu', 'kr', 'tw']
     if region not in valid_regions:
         await update.message.reply_text(f"Invalid region '{region}'. Valid options: {', '.join(valid_regions)}")
         return
         
-    search_term = parts[2].lower()
+    search_term = "-".join(parts).lower()
     
     from database import is_realm_index_expired, update_realm_index, find_known_realm
     
