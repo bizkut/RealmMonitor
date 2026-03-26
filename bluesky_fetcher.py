@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from atproto import AsyncClient
+import database
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +15,7 @@ class BlueskyFetcher:
         self.target_account = target_account
         self.client = AsyncClient()
         self._authenticated = False
-        # Only posts created AFTER this timestamp will be forwarded
-        self._start_time = datetime.now(timezone.utc)
-        logger.info("BlueskyFetcher for %s initialized. Will only forward posts after %s", 
-                     target_account, self._start_time.isoformat())
+        logger.info("BlueskyFetcher for %s initialized.", target_account)
 
     async def authenticate(self):
         """Authenticate with the Bluesky server."""
@@ -29,22 +27,11 @@ class BlueskyFetcher:
             logger.error("Failed to authenticate with Bluesky: %s", e)
             self._authenticated = False
 
-    def _parse_post_time(self, item) -> datetime | None:
-        """Parse the indexed_at timestamp from a feed item."""
-        try:
-            post_time_str = getattr(item.post, 'indexed_at', None)
-            if isinstance(post_time_str, str):
-                return datetime.fromisoformat(post_time_str.replace('Z', '+00:00'))
-            elif isinstance(post_time_str, datetime):
-                return post_time_str
-        except Exception as e:
-            logger.warning("Could not parse post time: %s", e)
-        return None
-
     async def fetch_new_posts(self) -> list[dict]:
         """
         Fetch new posts from the target account.
-        Only returns posts created AFTER the bot started.
+        Uses a DB-persisted last_seen_uri to ensure each post is only ever
+        forwarded once, even across restarts.
         """
         if not self._authenticated:
             await self.authenticate()
@@ -60,18 +47,28 @@ class BlueskyFetcher:
             if not feed.feed:
                 return []
 
+            # Load the last URI we already sent, from persistent DB storage
+            last_seen_uri = await database.get_bluesky_state(self.target_account)
+
+            if last_seen_uri is None:
+                # First run: silently record the latest post as baseline, send nothing.
+                latest_uri = feed.feed[0].post.uri
+                await database.update_bluesky_state(self.target_account, latest_uri)
+                logger.info("BlueskyFetcher[%s]: First run, bootstrapped last_seen_uri.", self.target_account)
+                return []
+
             new_posts = []
             for item in feed.feed:
+                uri = item.post.uri
+
+                # Stop when we hit a post we've already seen
+                if uri == last_seen_uri:
+                    break
+
                 # Skip replies and reposts (original posts only)
                 if item.reply or item.reason:
                     continue
 
-                # Only forward posts created AFTER bot start time
-                post_time = self._parse_post_time(item)
-                if post_time is None or post_time <= self._start_time:
-                    continue
-
-                uri = item.post.uri
                 text = getattr(item.post.record, 'text', '')
                 is_maintenance = "MAINTENANCE SCHEDULE" in text.upper()
 
@@ -88,10 +85,16 @@ class BlueskyFetcher:
                     'author_name': getattr(item.post.author, 'display_name', self.target_account)
                 })
 
+            if new_posts:
+                # Persist the newest URI so we don't re-send on next poll
+                newest_uri = feed.feed[0].post.uri
+                await database.update_bluesky_state(self.target_account, newest_uri)
+                logger.info("BlueskyFetcher[%s]: %d new post(s), advanced last_seen_uri.", self.target_account, len(new_posts))
+
             # Process chronologically (oldest first)
             new_posts.reverse()
             return new_posts
 
         except Exception as e:
-            logger.error("Error fetching Bluesky feed: %s", e)
+            logger.error("Error fetching Bluesky feed for %s: %s", self.target_account, e)
             return []
